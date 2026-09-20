@@ -473,7 +473,7 @@ describe('getDynamicMemory', () => {
     expect(state).toMatchObject({ observationThreshold: 99_000, reflectionThreshold: 88_000 });
   });
 
-  it('falls back to session state for thresholds but keeps an unset attachment column on Auto', async () => {
+  it('uses Factory defaults for unset threshold and attachment columns', async () => {
     const state: Record<string, unknown> = {
       observationThreshold: 99_000,
       observeAttachments: true,
@@ -494,9 +494,9 @@ describe('getDynamicMemory', () => {
     }) as unknown as { config: MemoryConfig };
 
     const { observation } = memory.config.options.observationalMemory;
-    expect(observation.messageTokens).toBe(99_000);
-    // A null column is Auto, the same value `GET /web/config/om` reports, so the
-    // runtime cannot silently observe attachments while the UI says Auto.
+    // Once a Factory row is present, its null columns mean the Factory defaults;
+    // stale values from session state must not override the settings UI.
+    expect(observation.messageTokens).toBe(30_000);
     expect(observation.observeAttachments).toBe('auto');
   });
 
@@ -672,6 +672,8 @@ describe('pack-driven OM models (A11)', () => {
     const { config, requestContext } = await createMemoryConfig({
       projectPath: '/tmp/project',
       activeModelPackId: 'custom:Work',
+      observerModelSelection: 'auto',
+      reflectorModelSelection: 'auto',
       observerModelId: 'google/gemini-3.5-flash',
     });
 
@@ -694,6 +696,8 @@ describe('pack-driven OM models (A11)', () => {
     const { config, requestContext } = await createMemoryConfig({
       projectPath: '/tmp/project',
       activeModelPackId: 'custom:Work',
+      observerModelSelection: 'auto',
+      reflectorModelSelection: 'auto',
       observerModelId: 'google/gemini-3.5-flash',
       reflectorModelId: 'anthropic/claude-sonnet-4-5',
     });
@@ -724,6 +728,7 @@ describe('pack-driven OM models (A11)', () => {
     const { config, requestContext } = await createMemoryConfig({
       projectPath: '/tmp/project',
       activeModelPackId: 'anthropic',
+      observerModelSelection: 'auto',
       observerModelId: 'google/gemini-3.5-flash',
       mastracodePendingPackFallback: {
         fromPackId: 'anthropic',

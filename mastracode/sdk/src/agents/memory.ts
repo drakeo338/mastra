@@ -99,7 +99,10 @@ function resolveOmRoleModelForRequest(
       const chained = resolvePackMemoryModelChain(settings, packId, resolveOptions);
       if (chained) {
         requestContext.set(`om.${role}.selectionMode`, 'auto');
-        requestContext.set(`om.${role}.effectiveModelId`, chained[0]?.model.modelId);
+        requestContext.set(
+          `om.${role}.effectiveModelId`,
+          Array.isArray(chained) ? chained[0]?.model.modelId : chained.modelId,
+        );
         return chained;
       }
     }

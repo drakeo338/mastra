@@ -294,7 +294,7 @@ export class ObserverRunner {
     options?: ObserverCallOptions,
   ): Promise<ObserverCallResult> {
     const inputTokens = this.tokenCounter.countMessages(messagesToObserve);
-    let resolvedModel: Awaited<ReturnType<ObservationModelResolver>> | { model: ConcreteObservationModel };
+    let resolvedModel: Awaited<ReturnType<ObservationModelResolver>>;
     try {
       resolvedModel = options?.model
         ? { model: options.model }
@@ -578,7 +578,7 @@ export class ObserverRunner {
       (total, messages) => total + this.tokenCounter.countMessages(messages),
       0,
     );
-    let resolvedModel: Awaited<ReturnType<ObservationModelResolver>> | { model: ConcreteObservationModel };
+    let resolvedModel: Awaited<ReturnType<ObservationModelResolver>>;
     try {
       resolvedModel = model
         ? { model }

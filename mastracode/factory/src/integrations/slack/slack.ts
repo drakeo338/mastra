@@ -32,7 +32,6 @@ import type {
 import type { FactoryActorExternalIdentity } from '../../storage/domains/comments/actor.js';
 import { actorFromChannelAuthor } from '../../storage/domains/comments/actor.js';
 import type { CommentsDomain } from '../../storage/domains/comments/domain.js';
-import type { MemorySettingsStorage } from '../../storage/domains/memory-settings/base.js';
 import type { ActiveModelPackRecord, ModelPacksStorage } from '../../storage/domains/model-packs/base.js';
 import type { FactoryProjectsStorage } from '../../storage/domains/projects/base.js';
 import type { SourceControlStorageHandle } from '../../storage/domains/source-control/base.js';
@@ -102,13 +101,6 @@ interface SlackChannelDeps {
   sourceControl?: SourceControlStorageHandle;
   /** Registered source-control partitions used to select the provider linked to each Factory project. */
   sourceControls?: readonly SourceControlStorageHandle[];
-  /**
-   * Observational-memory settings domain. When provided, a repo-backed session
-   * adopts its factory project's shared memory settings on start, matching the
-   * web kickoff — and the linked sender's own settings win over them for every
-   * knob the sender has saved.
-   */
-  memorySettings?: MemorySettingsStorage;
   /**
    * Model-packs domain. When provided, a new repo-backed session starts on the
    * linked sender's active pack build model — the model that user picked for
@@ -529,22 +521,13 @@ export function createChannelSessionResolver(deps: SlackChannelDeps): ChannelSes
  * default, else the SDK's built-in mode default. The choice is persisted on the
  * thread as `modeModelId_<mode>`, so it outlives the process that made it.
  *
- * Observational memory is configured here too, in the same order of who chose
- * it: the project's shared settings first, then the linked sender's own row,
- * which wins for every knob they have saved. The pair is re-applied on every
- * start rather than once — memory settings are stored preference, not a choice
- * made on this thread, and a restarted process re-resolves the project's row
- * before this hook runs.
- *
  * The model resolution is skipped on a session whose mode already has a model
  * persisted on the thread. That is the durable record of a deliberate choice —
  * either an earlier start or a user's own switch — and re-applying a preference
  * over it would undo the user's selection every time the process restarts.
- * Memory settings have no such per-thread record, so they are re-applied on
- * every start.
  */
 export function createChannelSessionStartHook(deps: SlackChannelDeps): ChannelSessionStart {
-  const { projects, memorySettings, modelPacks } = deps;
+  const { projects, modelPacks } = deps;
   const sourceControlSessions = createSourceControlSessionLookup(configuredSourceControls(deps));
   return async ({ session, thread, requestContext }) => {
     // Seed the tenant org above every guard below. `gateDispatch` stamps it on
@@ -575,14 +558,6 @@ export function createChannelSessionStartHook(deps: SlackChannelDeps): ChannelSe
     const modeModelKey = `modeModelId_${session.mode.get()}`;
     const persistedModelId = await session.thread.getSetting({ key: modeModelKey });
     if (typeof persistedModelId === 'string') {
-      // A restarted session restores its generation model from the thread, but
-      // still needs the project memory row and a provider-compatible fallback.
-      await hydrateFactorySession(session, {
-        orgId: owner.orgId,
-        factoryProjectId: owner.factoryProjectId,
-        observationalMemoryModelId: persistedModelId,
-        memorySettings,
-      });
       // Subagent models live in session state only, so restore the ones this
       // thread pinned at its first start instead of re-resolving them.
       for (const agentType of SUBAGENT_TYPES) {
@@ -597,13 +572,7 @@ export function createChannelSessionStartHook(deps: SlackChannelDeps): ChannelSe
 
       await hydrateFactorySession(session, {
         orgId: owner.orgId,
-        factoryProjectId: owner.factoryProjectId,
         defaultModelId: factoryModelId,
-        // Slack runs with the linked sender's credentials. Derive OM's fallback
-        // from that sender's selected model rather than the factory model, which
-        // may belong to a provider the sender cannot access.
-        observationalMemoryModelId: selectedModelId,
-        memorySettings,
       });
 
       if (selectedModelId && selectedModelId !== factoryModelId) {
@@ -618,14 +587,6 @@ export function createChannelSessionStartHook(deps: SlackChannelDeps): ChannelSe
             error: error instanceof Error ? error.message : String(error),
           });
           const currentModelId = session.model.get();
-          // The message continues on the factory/SDK model. Realign the OM
-          // fallback with that model while preserving explicit project settings.
-          await hydrateFactorySession(session, {
-            orgId: owner.orgId,
-            factoryProjectId: owner.factoryProjectId,
-            observationalMemoryModelId: currentModelId,
-            memorySettings,
-          });
           if (currentModelId && !factoryModelId) {
             try {
               await session.model.saveForMode({ modeId: session.mode.get(), modelId: currentModelId });
