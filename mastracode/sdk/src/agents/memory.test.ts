@@ -146,6 +146,7 @@ describe('getDynamicMemory', () => {
     loadSettingsMock.mockReset();
     loadSettingsMock.mockReturnValue({ models: {} });
     delete process.env.MASTRACODE_EXPERIMENTAL_SUBCONSCIOUS;
+    delete process.env.MC_E2E_DISABLE_OBSERVATIONAL_MEMORY;
   });
 
   it('wires Mastra Code observational memory activation defaults into core memory', async () => {
@@ -193,6 +194,16 @@ describe('getDynamicMemory', () => {
       requestContext,
       anthropicPromptCacheScope: 'system',
     });
+  });
+
+  it('keeps storage-backed memory while suppressing model-driven memory work in generic E2E scenarios', async () => {
+    process.env.MC_E2E_DISABLE_OBSERVATIONAL_MEMORY = '1';
+
+    const { config } = await createMemoryConfig({ projectPath: '/tmp/project' });
+
+    expect(config.storage).toEqual({ storage: true });
+    expect(config.options.generateTitle).toBe(false);
+    expect(config.options.observationalMemory).toBe(false);
   });
 
   it('keeps Subconscious memory inert unless explicitly opted in', async () => {
@@ -461,7 +472,10 @@ describe('getDynamicMemory', () => {
         : contextGet(key),
     );
 
-    const memory = getDynamicMemory({ storage: true } as never, undefined as never)({
+    const memory = getDynamicMemory(
+      { storage: true } as never,
+      undefined as never,
+    )({
       requestContext: requestContext as never,
     }) as unknown as { config: MemoryConfig };
 
@@ -489,7 +503,10 @@ describe('getDynamicMemory', () => {
       key === 'factoryMemorySettings' ? { observationThreshold: null, observeAttachments: null } : contextGet(key),
     );
 
-    const memory = getDynamicMemory({ storage: true } as never, undefined as never)({
+    const memory = getDynamicMemory(
+      { storage: true } as never,
+      undefined as never,
+    )({
       requestContext: requestContext as never,
     }) as unknown as { config: MemoryConfig };
 
