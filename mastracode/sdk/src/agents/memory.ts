@@ -12,7 +12,7 @@ import { loadSettings } from '../onboarding/settings.js';
 import { ANTHROPIC_PROMPT_CACHE_TTL } from '../providers/anthropic-prompt-cache.js';
 import type { MastraCodeState } from '../schema.js';
 import { getOmScope } from '../utils/project.js';
-import { resolveModel, resolvePackMemoryModelChain } from './model.js';
+import { resolveActiveModePackId, resolveModel, resolvePackMemoryModelChain } from './model.js';
 import type { PackMemoryModelChainEntry } from './model.js';
 
 /**
@@ -98,19 +98,8 @@ function resolveOmRoleModelForRequest(
   // agent at another settings path must get the same pack/override resolution
   // for observational memory as it does for the main model.
   const settings = loadSettings(settingsPath);
-  const pendingState = state?.mastracodePendingPackFallback as
-    | { toPackId?: unknown; threadId?: unknown }
-    | null
-    | undefined;
-  const pendingPackId =
-    pendingState &&
-    (pendingState.threadId === undefined || pendingState.threadId === controller?.threadId) &&
-    typeof pendingState.toPackId === 'string' &&
-    pendingState.toPackId.length > 0
-      ? pendingState.toPackId
-      : undefined;
-  const packId = pendingPackId ?? state?.activeModelPackId ?? settings.models?.activeModelPackId;
-  if (typeof packId === 'string' && packId.length > 0) {
+  const packId = resolveActiveModePackId(settings, state, controller?.threadId);
+  if (packId) {
     const packModel = resolvePackMemoryModelChain(settings, packId, resolveOptions);
     if (packModel === 'auto') return useAuto();
     if (packModel) {
