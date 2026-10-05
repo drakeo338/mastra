@@ -1207,8 +1207,6 @@ export class Agent<
    * objective record; unset fields fall back to the agent's `goal` config at
    * evaluation time. A judge model (here or in `goal.judge`) is required for the
    * goal to do anything.
-   *
-   * @experimental Agent goals are experimental and may change in a future release.
    */
   async setObjective(
     objective: string,
@@ -8770,9 +8768,6 @@ export class Agent<
     return fullOutput;
   }
 
-  /**
-   * @experimental Agent signals are experimental and may change in a future release.
-   */
   subscribeToThread<OUTPUT = TOutput>(
     options: AgentSubscribeToThreadOptions & { withInitialHistory: true | { perPage?: number } },
   ): Promise<AgentThreadSubscription<OUTPUT, true>>;
@@ -8788,9 +8783,6 @@ export class Agent<
     return agentThreadStreamRuntime.subscribeToThread<OUTPUT>(this.#getThreadRuntimeAgent(), options, this.getPubSub());
   }
 
-  /**
-   * @experimental Agent signals are experimental and may change in a future release.
-   */
   async claimThreadOwnership<OUTPUT = TOutput>(options: {
     resourceId: string;
     threadId: string;
@@ -8816,9 +8808,6 @@ export class Agent<
     );
   }
 
-  /**
-   * @experimental Agent signals are experimental and may change in a future release.
-   */
   updateThreadPeerAdvertisement(options: {
     resourceId: string;
     threadId: string;
@@ -8831,9 +8820,6 @@ export class Agent<
     );
   }
 
-  /**
-   * @experimental Agent signals are experimental and may change in a future release.
-   */
   async discoverThreadPeers(options?: DiscoverAgentThreadPeersOptions): Promise<AgentThreadPeerAdvertisement[]> {
     return agentThreadStreamRuntime.discoverThreadPeers(options, this.getPubSub(), this.#getThreadRuntimeAgent());
   }
@@ -9014,9 +9000,6 @@ export class Agent<
     return wrapperClose !== undefined || agentThreadStreamRuntime.abortRun(runId, this.getPubSub());
   }
 
-  /**
-   * @experimental Agent message APIs are experimental and may change in a future release.
-   */
   sendMessage<OUTPUT = TOutput>(
     message: AgentMessageInput,
     target: SendAgentMessageOptions<OUTPUT>,
@@ -9029,9 +9012,6 @@ export class Agent<
     );
   }
 
-  /**
-   * @experimental Agent message APIs are experimental and may change in a future release.
-   */
   queueMessage<OUTPUT = TOutput>(
     message: AgentMessageInput,
     target: QueueAgentMessageOptions<OUTPUT>,
@@ -9044,16 +9024,10 @@ export class Agent<
     );
   }
 
-  /**
-   * @experimental Agent message APIs are experimental and may change in a future release.
-   */
   cancelQueuedMessages(target: CancelQueuedAgentMessagesOptions): CancelQueuedAgentMessagesResult {
     return agentThreadStreamRuntime.cancelQueuedMessages(this as Agent<any, any, any, any>, target, this.getPubSub());
   }
 
-  /**
-   * @experimental Agent thread event APIs are experimental and may change in a future release.
-   */
   subscribeThreadEvents(scope: SubscribeAgentThreadEventsOptions, listener: AgentThreadEventListener): () => void {
     return agentThreadStreamRuntime.subscribeThreadEvents(
       this as Agent<any, any, any, any>,
@@ -9063,9 +9037,6 @@ export class Agent<
     );
   }
 
-  /**
-   * @experimental Agent state signal APIs are experimental and may change in a future release.
-   */
   sendStateSignal<OUTPUT = TOutput>(
     state: AgentStateSignalInput,
     target: SendAgentStateSignalOptions<OUTPUT>,
@@ -9084,8 +9055,6 @@ export class Agent<
    * notification dispatch workflow, so a deferred delivery can carry
    * freshly-resolved decision fields (e.g. `streamOptions` with the request
    * context a woken idle thread needs to resolve a model).
-   *
-   * @experimental Agent notification signal APIs are experimental and may change in a future release.
    */
   resolveNotificationDeliveryDecision(input: NotificationDeliveryPolicyInput): Promise<NotificationDeliveryDecision> {
     return resolveNotificationDeliveryDecision({
@@ -9094,9 +9063,6 @@ export class Agent<
     });
   }
 
-  /**
-   * @experimental Agent notification signal APIs are experimental and may change in a future release.
-   */
   async sendNotificationSignal<OUTPUT = TOutput>(
     notification: SendNotificationSignalInput,
     target: SendAgentNotificationSignalOptions<OUTPUT>,
@@ -9341,9 +9307,6 @@ export class Agent<
     return results;
   }
 
-  /**
-   * @experimental Agent signals are experimental and may change in a future release.
-   */
   sendSignal<OUTPUT = TOutput>(
     signal: AgentSignal,
     target: SendAgentSignalOptions<OUTPUT>,
