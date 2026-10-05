@@ -392,21 +392,11 @@ export function createDurableAgentStream<OUTPUT = undefined>(
           const attempt = streamEvent.modelAttemptId
             ? globalRunRegistry.get(runId)?.modelAttempts?.get(streamEvent.modelAttemptId)
             : undefined;
-          if (
-            attempt?.discarded &&
-            chunk.type !== 'step-finish' &&
-            chunk.type !== 'data-signal' &&
-            chunk.type !== 'data-user-message'
-          )
-            break;
-          if (attempt) {
-            if (chunk.type === 'step-finish') {
-              const step = chunk.payload.output.steps?.[0];
-              if (step) bindModelAttempt(step, attempt);
-            } else if (chunk.type !== 'data-signal' && chunk.type !== 'data-user-message') {
-              bindModelAttempt(chunk, attempt);
-              if (!outputProcessors?.length) attempt.recordEmitted(chunk);
-            }
+          if (attempt && chunk.type !== 'data-signal' && chunk.type !== 'data-user-message') {
+            // Signal echoes are input and survive their attempt; everything else it owns is dropped once discarded.
+            if (attempt.discarded) break;
+            bindModelAttempt(chunk, attempt);
+            if (!outputProcessors?.length) attempt.recordEmitted(chunk);
           }
           // Track error chunks for onError callback
           if ((chunk as any).type === 'error') {

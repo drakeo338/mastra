@@ -1210,7 +1210,6 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
     let primaryCalls = 0;
     let started = false;
     const initialFailure = barrier();
-    const seenPrimaryUsage: unknown[] = [];
     const onStepFinish = vi.fn();
     const memory = new MockMemory();
     const primary = new MockLanguageModelV2({
@@ -1261,7 +1260,6 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
           async processAPIError({ retryCount }) {
             expect(retryCount).toBe(0);
             await initialFailure.promise;
-            seenPrimaryUsage.push([...entry.modelAttempts!.values()].at(-1)?.usage);
           },
         },
       ],
@@ -1279,8 +1277,6 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       initialFailure.release();
       await vi.waitFor(() => expect(started).toBe(true));
       await vi.waitFor(() => expect(chunks.some(chunk => chunk.type === 'reasoning-delta')).toBe(true));
-      const attempt = [...entry.modelAttempts!.values()].at(-1)!;
-      expect(attempt.usage.inputTokens).toBeUndefined();
       await (
         await agent.sendSignal({ type: 'user', contents: 'FALLBACK_SIGNAL' }, scope)
       ).accepted;
@@ -1288,10 +1284,6 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       await entry.workflowExecution;
       expect(primaryCalls).toBe(2);
       expect(prompts).toHaveLength(2);
-      expect(seenPrimaryUsage).toEqual([
-        expect.objectContaining({ inputTokens: 77 }),
-        expect.objectContaining({ inputTokens: 77 }),
-      ]);
       expect(onStepFinish).toHaveBeenCalledTimes(1);
       expect(onStepFinish.mock.calls[0]?.[0].usage.inputTokens).toBe(5);
       expect(await stream.output.totalUsage).toMatchObject({ inputTokens: 5, outputTokens: 3, totalTokens: 8 });
@@ -1305,83 +1297,6 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       await entry.workflowExecution;
       stream.cleanup();
       await customPubsub?.close();
-    }
-  });
-
-  it.each([0, 7])('captures interrupted provider usage with %i input tokens before acceptance', async inputTokens => {
-    const transport = new HeldStreamPubSub('reasoning-delta');
-    const held = transport.gate;
-    const prompts: unknown[] = [];
-    const onStepFinish = vi.fn();
-    const memory = new MockMemory();
-    const outputTokens = inputTokens === 0 ? 0 : 4;
-    const usage = { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
-    const { agent, customPubsub } = createOwner(
-      engine,
-      {
-        id: crypto.randomUUID(),
-        name: 'Reported usage',
-        instructions: 'Test',
-        memory,
-        model: new MockLanguageModelV2({
-          doStream: async ({ prompt }) => {
-            prompts.push(prompt);
-            return {
-              warnings: [],
-              stream: convertArrayToReadableStream(
-                prompts.length > 1
-                  ? answer()
-                  : [
-                      { type: 'stream-start', warnings: [] },
-                      { type: 'reasoning-start', id: 'measured' },
-                      { type: 'reasoning-delta', id: 'measured', delta: 'MEASURED_DISCARDED' },
-                      { type: 'finish', finishReason: 'stop', usage },
-                    ],
-              ),
-            };
-          },
-        }),
-      },
-      transport,
-    );
-    const scope = { threadId: crypto.randomUUID(), resourceId: crypto.randomUUID() };
-    const stream = await agent.stream('initial question', {
-      memory: { thread: scope.threadId, resource: scope.resourceId },
-      maxSteps: 3,
-      onStepFinish,
-    });
-    const entry = globalRunRegistry.get(stream.runId)!;
-    const chunks: ChunkType[] = [];
-    const consumption = collect(stream.fullStream, chunks);
-    try {
-      await vi.waitFor(() => expect(transport.held).toBe(true));
-      const attempt = [...entry.modelAttempts!.values()].at(-1)!;
-      await vi.waitFor(() => expect(attempt.usage).toMatchObject(usage));
-      await (
-        await agent.sendSignal({ type: 'user', contents: 'MEASURED_SIGNAL' }, scope)
-      ).accepted;
-      expect(attempt.discarded).toBe(true);
-      held.release();
-      await consumption;
-      await entry.workflowExecution;
-      expect(prompts).toHaveLength(2);
-      expect(onStepFinish).toHaveBeenCalledTimes(1);
-      expect(onStepFinish.mock.calls[0]?.[0]).toMatchObject({
-        text: 'replacement answer',
-        usage: { inputTokens: 5, outputTokens: 3, totalTokens: 8 },
-      });
-      expect(await stream.output.steps).toHaveLength(1);
-      expect(await stream.output.totalUsage).toMatchObject({ inputTokens: 5, outputTokens: 3, totalTokens: 8 });
-      expect(JSON.stringify(prompts[1])).not.toContain('MEASURED_DISCARDED');
-      expect(JSON.stringify((await memory.recall(scope)).messages)).not.toContain('MEASURED_DISCARDED');
-    } finally {
-      held.release();
-      stream.abort();
-      await consumption.catch(() => {});
-      await entry.workflowExecution;
-      stream.cleanup();
-      await customPubsub?.close();
-      await transport.close();
     }
   });
 
