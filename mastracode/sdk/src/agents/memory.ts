@@ -232,7 +232,11 @@ export function getDynamicMemory(storage: MastraCompositeStore, vector?: MastraV
   // Routes the concrete model Memory's `'auto'` picks through Mastra Code's
   // credential-aware resolver, like every other Mastra Code model.
   const resolveMemoryModel = (modelId: string, { requestContext }: { requestContext?: RequestContext }) =>
-    resolveModel(modelId, { remapForCodexOAuth: true, requestContext });
+    resolveModel(modelId, {
+      remapForCodexOAuth: true,
+      requestContext,
+      anthropicPromptCacheScope: 'system',
+    });
 
   return ({ requestContext }: { requestContext: RequestContext }) => {
     const controller = requestContext.get('controller') as AgentControllerRequestContext<MastraCodeState> | undefined;
