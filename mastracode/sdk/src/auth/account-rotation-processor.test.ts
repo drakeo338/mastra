@@ -795,41 +795,18 @@ describe('AccountStartNoticeProcessor.processInput', () => {
     }
   });
 
-  it('emits the start notice once when the active account is not the first entry', async () => {
+  it('never announces which account a turn starts on', async () => {
     const seeded = await makeTwoAccountStorage();
+    const processor = new AccountStartNoticeProcessor({ credentialStore: seeded.storage });
+
+    const firstActive = makeInputArgs();
+    await processor.processInput(firstActive as any);
+    expect(firstActive.writer.custom).not.toHaveBeenCalled();
+
     seeded.storage.activateAccount(PROVIDER, seeded.accountB.id);
-    const processor = new AccountStartNoticeProcessor({ credentialStore: seeded.storage });
-    const args = makeInputArgs();
-
-    await processor.processInput(args as any);
-
-    expect(args.writer.custom).toHaveBeenCalledTimes(1);
-    const part = args.writer.custom.mock.calls[0][0];
-    expect(part.type).toBe('data-mastracode-account-switch');
-    expect(part.data).toMatchObject({
-      provider: PROVIDER,
-      from: null,
-      to: { id: seeded.accountB.id, label: 'Account B' },
-      reason: 'starting-on-account',
-    });
-
-    // Once per request: a second call on the same state emits nothing more.
-    await processor.processInput(args as any);
-    expect(args.writer.custom).toHaveBeenCalledTimes(1);
-  });
-
-  it('stays silent when the first account is active or the pool has one account', async () => {
-    const seeded = await makeTwoAccountStorage();
-    const processor = new AccountStartNoticeProcessor({ credentialStore: seeded.storage });
-    const args = makeInputArgs();
-    await processor.processInput(args as any);
-    expect(args.writer.custom).not.toHaveBeenCalled();
-
-    const noModel = makeInputArgs({
-      requestContext: { get: () => undefined },
-    });
-    await processor.processInput(noModel as any);
-    expect(noModel.writer.custom).not.toHaveBeenCalled();
+    const laterActive = makeInputArgs();
+    await processor.processInput(laterActive as any);
+    expect(laterActive.writer.custom).not.toHaveBeenCalled();
   });
 
   it('A14: a targeted route attempts its named account even when thread metadata carries a legacy exhausted mark', async () => {
@@ -1099,15 +1076,14 @@ describe('AccountStartNoticeProcessor.processInput', () => {
     expect((await rotationProcessor.processAPIError({ ...errorArgs, error: apiError(429) } as never)).retry).toBe(true);
 
     // A14: `Automatic` resumes at the persisted active account (C, activated by
-    // the third `addAccount`) and walks insertion order from there, so the turn
-    // is announced as starting on C and rotation then visits A and B. Starting
-    // at A instead would re-try the account the cursor last moved past.
+    // the third `addAccount`) and walks insertion order from there, so rotation
+    // visits A and B. Starting at A instead would re-try the account the cursor
+    // last moved past.
     const parts = inputArgs.writer.custom.mock.calls
       .map(call => call[0])
       .filter(part => part.type === ACCOUNT_SWITCH_PART_TYPE && part.data.to)
       .map(part => ({ to: part.data.to.id, reason: part.data.reason }));
     expect(parts).toEqual([
-      { to: accountC.id, reason: 'starting-on-account' },
       { to: seeded.accountA.id, reason: 'rate-limit' },
       { to: seeded.accountB.id, reason: 'rate-limit' },
     ]);
