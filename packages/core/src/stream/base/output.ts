@@ -7,7 +7,6 @@ import { MastraBase } from '../../base';
 import { ErrorCategory, ErrorDomain, MastraError } from '../../error';
 import { getErrorFromUnknown } from '../../error/utils.js';
 import type { ScorerRunInputForAgent, ScorerRunOutputForAgent } from '../../evals';
-import { bindModelAttempt, getModelAttempt } from '../../loop/shared/model-attempt';
 import type { ObservabilityContext } from '../../observability';
 import { getRootExportSpan, resolveObservabilityContext } from '../../observability';
 import type { OutputResult } from '../../processors';
@@ -448,21 +447,8 @@ export class MastraModelOutput<OUTPUT = undefined> extends MastraBase {
 
     const self = this;
 
-    const modelAttempt = getModelAttempt(stream);
-    if (modelAttempt) bindModelAttempt(this, modelAttempt);
-
-    // Observe raw boundaries before a processor can delay or suppress them.
-    let processedStream = modelAttempt
-      ? stream.pipeThrough(
-          new TransformStream<ChunkType<OUTPUT>, ChunkType<OUTPUT>>({
-            transform(chunk, controller) {
-              if (!modelAttempt.observe(chunk)) return;
-              bindModelAttempt(chunk, modelAttempt);
-              controller.enqueue(chunk);
-            },
-          }),
-        )
-      : stream;
+    // Apply output processors if they exist
+    let processedStream = stream;
     const processorRunner = this.processorRunner;
     if (processorRunner && options.isLLMExecutionStep) {
       // Use shared processor states if provided, otherwise create new ones
@@ -478,28 +464,9 @@ export class MastraModelOutput<OUTPUT = undefined> extends MastraBase {
       let observabilityContext: ObservabilityContext | undefined;
       const getObservabilityContext = () => (observabilityContext ??= resolveObservabilityContext(options));
 
-      processedStream = processedStream.pipeThrough(
+      processedStream = stream.pipeThrough(
         new TransformStream<ChunkType<OUTPUT>, ChunkType<OUTPUT>>({
-          async transform(chunk, rawController) {
-            // Durable transports bind each chunk, since this stream spans several attempts.
-            const modelAttempt = getModelAttempt(chunk) ?? getModelAttempt(stream);
-            if (modelAttempt?.discarded) return;
-            const controller = modelAttempt
-              ? {
-                  enqueue(part: ChunkType<OUTPUT>) {
-                    if (!modelAttempt.observeWriter(part)) return;
-                    if (part.type !== 'data-signal' && part.type !== 'data-user-message')
-                      bindModelAttempt(part, modelAttempt);
-                    if (!getModelAttempt(stream)) modelAttempt.recordEmitted(part);
-                    rawController.enqueue(part);
-                  },
-                  error: (reason: unknown) => rawController.error(reason),
-                  terminate: () => rawController.terminate(),
-                  get desiredSize() {
-                    return rawController.desiredSize;
-                  },
-                }
-              : rawController;
+          async transform(chunk, controller) {
             // Filter out intermediate finish chunks with 'tool-calls' reason
             // These are internal signals that shouldn't reach output processors
             //
@@ -559,17 +526,18 @@ export class MastraModelOutput<OUTPUT = undefined> extends MastraBase {
                   data: { type: string; data?: unknown; transient?: boolean },
                   writerOptions?: { messageId?: string },
                 ) => {
-                  if (modelAttempt && !modelAttempt.observeWriter(data)) return;
-                  persistProcessorDataChunk(
-                    self.messageList,
-                    writerOptions?.messageId ?? modelAttempt?.messageId ?? self.messageId,
-                    data,
-                  );
+                  persistProcessorDataChunk(self.messageList, writerOptions?.messageId ?? self.messageId, data);
                   controller.enqueue(data as ChunkType<OUTPUT>);
                 },
               };
 
-              const processing = processorRunner.processPart(
+              const {
+                part: processed,
+                blocked,
+                reason,
+                tripwireOptions,
+                processorId,
+              } = await processorRunner.processPart(
                 chunk,
                 processorStates,
                 getObservabilityContext(),
@@ -579,14 +547,6 @@ export class MastraModelOutput<OUTPUT = undefined> extends MastraBase {
                 streamWriter,
                 options.abortSignal,
               );
-              const {
-                part: processed,
-                blocked,
-                reason,
-                tripwireOptions,
-                processorId,
-              } = await (modelAttempt ? modelAttempt.trackProcessing(processing) : processing);
-              if (modelAttempt?.discarded) return;
               const enqueueTripwire = (r?: string, opts?: { retry?: boolean; metadata?: unknown }, pid?: string) => {
                 controller.enqueue({
                   type: 'tripwire',
@@ -612,7 +572,7 @@ export class MastraModelOutput<OUTPUT = undefined> extends MastraBase {
               // non-text part that triggered a BatchPartsProcessor flush),
               // pushing each back through the whole chain for downstream
               // processing.
-              const reprocessing = processorRunner.drainReprocessParts(
+              const reprocessed = await processorRunner.drainReprocessParts(
                 processorStates,
                 getObservabilityContext(),
                 options.requestContext,
@@ -621,8 +581,6 @@ export class MastraModelOutput<OUTPUT = undefined> extends MastraBase {
                 streamWriter,
                 options.abortSignal,
               );
-              const reprocessed = await (modelAttempt ? modelAttempt.trackProcessing(reprocessing) : reprocessing);
-              if (modelAttempt?.discarded) return;
               for (const r of reprocessed) {
                 if (r.blocked) {
                   enqueueTripwire(r.reason, r.tripwireOptions, r.processorId);
@@ -658,17 +616,6 @@ export class MastraModelOutput<OUTPUT = undefined> extends MastraBase {
     this.#baseStream = processedStream.pipeThrough(
       new TransformStream<ChunkType<OUTPUT>, ChunkType<OUTPUT>>({
         transform: async (chunk, controller) => {
-          const attempt = getModelAttempt(chunk);
-          if (attempt?.discarded && chunk.type !== 'data-signal' && chunk.type !== 'data-user-message') return;
-          if (attempt && chunk.type.startsWith('reasoning-')) {
-            attempt.trackParts(self.#bufferedByStep.reasoning);
-            const details = self.#bufferedByStepReasoningDetails;
-            const previousDetails = { ...details };
-            attempt.addDiscardCleanup(details, () => {
-              for (const id of Object.keys(details)) delete details[id];
-              Object.assign(details, previousDetails);
-            });
-          }
           switch (chunk.type) {
             case 'tool-call-suspended':
             case 'tool-call-approval':
@@ -688,6 +635,12 @@ export class MastraModelOutput<OUTPUT = undefined> extends MastraBase {
                 await options?.onFinish?.(self.#createAbortedOnFinishPayload());
               }
               self.#closeTransportIfNeeded();
+              break;
+            case 'step-start':
+              // A step reports the reasoning of the model request that completed it. A request
+              // cancelled by a queued signal ends without step-finish, so drop what it streamed.
+              self.#bufferedByStep.reasoning = [];
+              self.#bufferedByStepReasoningDetails = {};
               break;
             case 'raw':
               if (!self.#options.includeRawChunks) {
