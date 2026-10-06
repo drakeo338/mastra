@@ -1078,7 +1078,6 @@ export class KnowledgePG extends KnowledgeStorage {
     sourceId: string;
     targetId: string;
     sourceVersion: number;
-    targetVersion: number;
     importRunId?: string;
     contextScopeId?: string;
     expectedAccessEpoch?: number;
@@ -1092,7 +1091,6 @@ export class KnowledgePG extends KnowledgeStorage {
       sourceId: string;
       targetId: string;
       sourceVersion: number;
-      targetVersion: number;
       importRunId?: string;
       contextScopeId?: string;
       expectedAccessEpoch?: number;
@@ -1104,7 +1102,6 @@ export class KnowledgePG extends KnowledgeStorage {
     if (!source) throw new KnowledgeNotFoundError('node', input.sourceId);
     const target = await this.#getNode(tx, input.targetId);
     if (!target) throw new KnowledgeNotFoundError('node', input.targetId);
-    if (target.version !== input.targetVersion) throw new KnowledgeConflictError(input.targetId);
     const sourceScopeIds = await this.#getNodeScopeIds(tx, source.id);
     const now = new Date();
     const updated = await tx.execute({
@@ -1667,6 +1664,7 @@ export class KnowledgePG extends KnowledgeStorage {
   async deleteRecordBySource(input: {
     id: string;
     source: string;
+    version: number;
     importRunId?: string;
     expectedAccessEpoch?: number;
   }): Promise<KnowledgeRecord> {
@@ -2502,7 +2500,7 @@ export class KnowledgePG extends KnowledgeStorage {
       if (!mutation.kind || !mutation.mutation || typeof mutation.mutation !== 'object') {
         throw new Error(`Unsupported immutable payload for knowledge proposal ${proposal.id}`);
       }
-      if (proposal.operation !== mutation.kind) {
+      if (!input.verifiedMutation && proposal.operation !== mutation.kind) {
         throw new KnowledgeConflictError('Proposal operation does not match its payload');
       }
       assertKnowledgeProposalMutationSemantics(mutation, proposal.targets);
